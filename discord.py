@@ -1,8 +1,7 @@
-import discord
+import nextcord as discord
 import requests
 import json
 import logging
-
 import os
 from dotenv import load_dotenv
 
@@ -19,14 +18,8 @@ print(f'Base URL: {base_url}')
 logging.basicConfig(level=logging.INFO)
 
 intents = discord.Intents.default()
-intents.typing = False
-intents.presences = False
-
-bot_token = os.getenv('BOT_TOKEN')
-api_key = os.getenv('API_KEY')
-base_url = os.getenv('BASE_URL', 'https://api.personal.ai/v1/message')
-command_prefix = '!chat'
-
+intents.messages = True
+intents.message_content = True
 client = discord.Client(intents=intents)
 
 def get_ai_response(message):
@@ -67,9 +60,18 @@ async def on_message(message):
     channel_name = message.channel.name if not isinstance(message.channel, discord.DMChannel) else 'Direct Message'
     print(f'Received message from {message.author.name} in {channel_name}: {message.content}, {message.attachments}, {message.embeds}, {message.mentions}, {message.mention_everyone}, {message.role_mentions}, {message.reactions}')
 
-    print(f'Raw message content: "{message.content}"')  # Print the raw message content
+    print(f'Message type: {message.type}')
+    print(f'Message system content: "{message.system_content}"')
+    if message.type == discord.MessageType.thread_created:
+        print(f'Thread: {message.thread}')
+
+    if message.type != discord.MessageType.default:
+        print(f'Non-default message type: {message.type}')
+        return
+
+    print(f'Raw message content: "{message.content}"')
     content = message.content.strip()
-    print(f'Stripped message content: "{content}"')  # Print the stripped message content
+    print(f'Stripped message content: "{content}"')
 
     print(f'Author ID: {message.author.id}, Discriminator: {message.author.discriminator}, Is bot: {message.author.bot}')
     print(f'Message ID: {message.id}, Edited at: {message.edited_at}, Pinned: {message.pinned}')
