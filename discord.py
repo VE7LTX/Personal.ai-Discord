@@ -1,117 +1,178 @@
-# Importing necessary modules
-import nextcord as discord  # Discord API wrapper for Python
-import requests  # Module for handling HTTP requests
-import json  # Module for handling JSON data
-import logging  # Module for logging application events
-import os  # Module for interacting with the operating system
-from dotenv import load_dotenv  # Module for loading environment variables from a .env file
+"""
+Discord Bot for Easytrain.ai Platform
+Author: Matthew Schafer (VE7LTX), Diagonal Thinking Ltd.
 
-load_dotenv()  # Loading environment variables
+This Python script interacts with the Discord API and the Easytrain.ai platform
+to log messages and process them through AI.
 
-# Retrieving environment variables for bot token, API key, and base URL
-bot_token = os.getenv('BOT_TOKEN')  # The bot token for your Discord bot
-api_key = os.getenv('API_KEY')  # The API key for the AI service
-base_url = os.getenv('BASE_URL', 'https://api.personal.ai/v1/message')  # The base URL for the AI service
+Key functionalities:
 
-print(f'Bot token: {bot_token}')
-print(f'API key: {api_key}')
-print(f'Base URL: {base_url}')
+1. Connects to Discord using the bot token and sets up a client to listen for 
+   new messages across all channels that the bot has access to.
 
-# Setting up logging
+2. When a new message is detected, the bot creates a log entry for it. This log 
+   includes metadata such as the message ID, channel, type, content, the author's 
+   details, timestamps, and other details that could be relevant.
+
+3. This log entry is stored in an activity cache, which temporarily holds multiple 
+   log entries before they are sent to the memory API.
+
+4. The bot then sends the user's message to the AI API. It uses the log entry as 
+   context for the AI, which helps it understand the conversation's context.
+
+5. If the AI API is available, it processes the message and returns a response 
+   that the bot then sends back to the Discord chat.
+
+6. If the AI API is down, the bot handles the exception and retries the request 
+   up to 5 times with exponential backoff. It also logs the exception and sends 
+   a message to the Discord chat to indicate that the API is down.
+
+7. After the response has been sent, or if an exception occurred, the bot sends 
+   the activity cache to the memory API. It divides the cache into chunks that 
+   are small enough for the API to handle.
+
+8. In addition, the bot listens for errors on other events. If an error occurs, 
+   it writes it to a file for later review.
+
+The script uses these third-party Python libraries:
+- nextcord: for Discord API interaction
+- requests: for making HTTP requests to the AI API and memory API
+- json: for JSON data handling
+- logging: for logging events and errors
+- os and dotenv: for handling environment variables securely
+- retrying: for retrying requests to the AI API
+
+The bot uses environment variables to securely handle sensitive information, 
+such as the bot token and the AI API key.
+
+Created on: June 12, 2023
+"""
+
+
+import nextcord as discord
+import requests
+import json
+import logging
+import os
+from datetime import datetime
+from dotenv import load_dotenv
+from retrying import retry
+
+load_dotenv()
+
+bot_token = os.getenv('BOT_TOKEN')
+api_key = os.getenv('API_KEY')
+base_url = os.getenv('BASE_URL', 'https://api.personal.ai/v1/message')
+memory_api_url = os.getenv('MEMORY_API_URL', 'https://api.personal.ai/v1/memory')
+
 logging.basicConfig(level=logging.INFO)
 
-# Defining intents - Intents dictate what events a bot can "listen" for
-intents = discord.Intents.default()  # Get the default Intents object, which includes all intents
-intents.messages = True  # Allow the bot to receive message events
-intents.message_content = True  # Allow the bot to view message content
-client = discord.Client(intents=intents)  # Create a new Client object with the defined intents
+activity_cache = []
 
-def get_ai_response(message):
-    headers = {  # Define headers for the API request
+# Create a new Discord client with all intents enabled
+intents = discord.Intents.all()
+client = discord.Client(intents=intents)
+
+def create_log_entry(message):
+    log_entry = {
+        "timestamp": str(datetime.now()),
+        "message_id": message.id,
+        "channel_name": str(message.channel.name if not isinstance(message.channel, discord.DMChannel) else 'Direct Message'),
+        "message_type": str(message.type),
+        "message_content": message.content,
+        "message_system_content": message.system_content,
+        "message_stripped_content": message.content.strip(),
+        "author_id": message.author.id,
+        "author_name": message.author.name,
+        "author_discriminator": message.author.discriminator,
+        "author_is_bot": message.author.bot,
+        "message_edited_at": str(message.edited_at),
+        "message_pinned": message.pinned,
+        "channel_id": message.channel.id,
+        "channel_type": str(message.channel.type),
+        "guild_id": message.guild.id if not isinstance(message.channel, discord.DMChannel) else None,
+        "guild_name": message.guild.name if not isinstance(message.channel, discord.DMChannel) else None,
+        "message_attachments": [str(attachment.to_dict()) for attachment in message.attachments],
+        "message_embeds": [str(embed.to_dict()) for embed in message.embeds],
+        "message_mentions": [str(mention.to_dict()) for mention in message.mentions],
+        "message_mention_everyone": message.mention_everyone,
+        "message_role_mentions": [str(role_mention.to_dict()) for role_mention in message.role_mentions],
+        "message_reactions": [str(reaction.to_dict()) for reaction in message.reactions],
+        "DeviceName": "Discord",
+        "RawFeedText": message.content.strip()
+    }
+    return log_entry
+
+def send_to_memory_api():
+    global activity_cache
+    headers = {
         'Content-Type': 'application/json',
-        'x-api-key': api_key  # Inserting the API key
+        'x-api-key': api_key
     }
+    while activity_cache:
+        memory_text = ''
+        while activity_cache and len(memory_text) + len(json.dumps(activity_cache[0])) <= 64000:
+            memory_text += json.dumps(activity_cache.pop(0)) + '\n'
+        data = {
+            'Text': memory_text.strip(),
+            'SourceName': 'Discord Bot',
+            'CreatedTime': str(datetime.now()),
+            'DeviceName': 'Discord',
+            'RawFeedText': memory_text.strip()
+        }
+        response = requests.post(memory_api_url, headers=headers, json=data)
+        logging.info(f'Sent memory to memory API: {response.text}')
 
-    message_data = {  # Define the data to send with the request
-        'Text': str(message)
-    }
-
-    # Log the request
-    print(f'Sending request to {base_url} with data {message_data}')
-
-    try:
-        # Send a POST request to the API
-        response = requests.post(base_url, headers=headers, json=message_data, timeout=60)
-        response.raise_for_status()  # If the request fails, this will raise an exception
-        response_json = response.json()  # Convert the response to JSON format
-        print(f'AI response: {json.dumps(response_json, indent=2)}')
-        return response_json.get('ai_message', '')  # Return the 'ai_message' from the response
-    except requests.HTTPError as http_err:  # If a HTTP error occurred, log the error and return a message
-        print(f'HTTP error occurred: {http_err}') 
-    except Exception as err:  # If an error occurred, log the error and return a message
-        print(f'Other error occurred: {err}')
-    return 'Sorry, an error occurred while processing your request.'
+@retry(stop_max_attempt_number=5, wait_exponential_multiplier=1000, wait_exponential_max=10000)
+def send_to_ai_api(data, headers):
+    response = requests.post(base_url, headers=headers, json=data)
+    logging.info(f'Sent message to AI API: {data}')
+    logging.info(f'Received response from AI API: {response.text}')
+    if response.status_code != 200:
+        logging.error(f'Error: AI API returned status code {response.status_code}')
+    return response
 
 @client.event
 async def on_ready():
-    # This function runs when the bot has connected to the Discord server
-    print(f'Logged in as {client.user.name}')
-    print(f'Bot ID: {client.user.id}')
-    print('------')
+    logging.info(f'We have logged in as {client.user}')
 
 @client.event
 async def on_message(message):
-    # This function runs every time a message is received
-
     if message.author == client.user:
-        return  # If the message is from the bot itself, ignore it
-
-    # Print details about the message
-    channel_name = message.channel.name if not isinstance(message.channel, discord.DMChannel) else 'Direct Message'
-    print(f'Received message from {message.author.name} in {channel_name}: {message.content}, {message.attachments}, {message.embeds}, {message.mentions}, {message.mention_everyone}, {message.role_mentions}, {message.reactions}')
-
-    # Print details about the message type
-    print(f'Message type: {message.type}')
-    print(f'Message system content: "{message.system_content}"')
-    if message.type == discord.MessageType.thread_created:
-        print(f'Thread: {message.thread}')
-
-    # If the message is not a default message, ignore it
-    if message.type != discord.MessageType.default:
-        print(f'Non-default message type: {message.type}')
         return
 
-    # Print details about the raw message content
-    print(f'Raw message content: "{message.content}"')
-    content = message.content.strip()  # Remove leading/trailing whitespace
-    print(f'Stripped message content: "{content}"')
+    log_entry = create_log_entry(message)
+    activity_cache.append(log_entry)
 
-    # Print details about the message author
-    print(f'Author ID: {message.author.id}, Discriminator: {message.author.discriminator}, Is bot: {message.author.bot}')
-    
-    # Print details about the message itself
-    print(f'Message ID: {message.id}, Edited at: {message.edited_at}, Pinned: {message.pinned}')
-    print(f'Channel ID: {message.channel.id}, Channel type: {message.channel.type}')
+    logging.info(f'Received message from {message.author}: {message.content}')
 
-    if not isinstance(message.channel, discord.DMChannel):
-        # If the message was not a DM, print details about the guild
-        print(f'Guild ID: {message.guild.id}, Guild name: {message.guild.name}')
+    data = {
+        'context': json.dumps(log_entry, default=str),
+        'message': message.content
+    }
 
-    # Print details about any reactions to the message
-    for reaction in message.reactions:
-        print(f'Reaction: {reaction.emoji}, Count: {reaction.count}, Me: {reaction.me}')
-        
-    if not content:
-        print('Message content is empty after stripping.')
-        return
+    headers = {
+        'Content-Type': 'application/json',
+        'x-api-key': api_key
+    }
 
-    response = get_ai_response(content)  # Get a response from the AI
+    try:
+        response = send_to_ai_api(data, headers)
+        response_data = response.json()
+        ai_message = response_data.get('ai_message')
+        ai_score = response_data.get('score')  # Extract score from the response
+        await message.channel.send(f'{ai_message}\nAI confidence score: {ai_score}')
+        send_to_memory_api()
+    except Exception as e:
+        logging.error(f'Error: {e}')
+        await message.channel.send('API Down. RETRYING...')
 
-    if not response:
-        print('AI response is empty.')
-        return
+@client.event
+async def on_error(event, *args, **kwargs):
+    with open('err.log', 'a') as f:
+        if event == 'on_message':
+            f.write(f'Unhandled message: {args[0]}\n')
+        else:
+            raise
 
-    print(f'Sending message: {response}')
-    await message.channel.send(response)  # Send the response as a message
-
-client.run(bot_token)  # Connect the bot to the Discord server
+client.run(bot_token)
