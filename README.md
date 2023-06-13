@@ -25,7 +25,7 @@ This is a Discord bot that interacts with an AI service to generate responses an
    - `API_KEY` - API key for the AI service and memory API
    - `BASE_URL` - Base URL for the AI service API (default: 'https://api.personal.ai/v1/message')
    - `MEMORY_API_URL` - URL for the memory API (default: 'https://api.personal.ai/v1/memory')
-4. Run the bot: `python discord_bot.py`
+4. Run the bot: `python discord.py`
 
 ## Usage
 
