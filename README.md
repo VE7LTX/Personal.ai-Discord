@@ -10,6 +10,7 @@ This is a Discord bot that interacts with an AI service to generate responses an
 
 ## Dependencies
 
+- A Personal.ai API Tier Account
 - Python 3.7 or higher
 - `nextcord` (Discord.py) - Library for Discord integration
 - `requests` - Library for making HTTP requests
