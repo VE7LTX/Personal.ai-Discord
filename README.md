@@ -23,13 +23,12 @@ This is a Discord bot that interacts with an AI service to generate responses an
 3. Set up your environment variables in a `.env` file:
    - `BOT_TOKEN` - Token for your Discord bot
    - `API_KEY` - API key for the AI service and memory API
-   - `BASE_URL` - Base URL for the AI service API (default: 'https://api.personal.ai/v1/message')
-   - `MEMORY_API_URL` - URL for the memory API (default: 'https://api.personal.ai/v1/memory')
-4. Run the bot: `python discord.py`
+
+## Bot Setup
 
 ## Usage
 
-1. Invite the bot to your Discord server using the provided OAuth2 link.
+1. Invite the bot to your Discord server using an OAuth2 link generated from your discord developer portal.
 2. Start the bot by running the `discord.py` script.
 3. The bot will listen to messages in the server channels and respond accordingly.
 4. Messages will be uploaded to the memory API for analysis.
