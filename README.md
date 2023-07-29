@@ -30,7 +30,7 @@ This is a Discord bot that interacts with an AI service to generate responses an
 ## Usage
 
 1. Invite the bot to your Discord server using the provided OAuth2 link.
-2. Start the bot by running the `discord_bot.py` script.
+2. Start the bot by running the `discord.py` script.
 3. The bot will listen to messages in the server channels and respond accordingly.
 4. Messages will be uploaded to the memory API for analysis.
 
@@ -40,4 +40,4 @@ Contributions are welcome! If you find any issues or have suggestions for improv
 
 ## License
 
-OPEN SOURCE 4 LIFE
+Unlicense
